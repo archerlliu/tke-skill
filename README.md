@@ -1,42 +1,42 @@
-**中文** | [English](README_EN.md)
+**English** | [中文](README_CN.md)
 
 # TKE Skill
 
-腾讯云 TKE 容器服务运维 Skill，无需安装 MCP Server，通过 AI Coding Agent 的 Skill 机制直接管理 TKE 集群。
+Tencent Cloud TKE (Tencent Kubernetes Engine) operations Skill. No MCP Server required — manage TKE clusters directly through the Skill mechanism of AI Coding Agents.
 
-支持 OpenClaw、CodeBuddy、Claude Code、Gemini CLI 等主流 AI Coding Agent。
+Supports OpenClaw, CodeBuddy, Claude Code, Gemini CLI, and other mainstream AI Coding Agents.
 
-## 安装依赖
+## Prerequisites
 
 ```bash
 pip install tencentcloud-sdk-python-tke
 ```
 
-## 凭证配置
+## Credential Configuration
 
-支持两种方式（命令行参数优先级更高）：
+Two methods are supported (CLI arguments take precedence):
 
-### 方式一：环境变量（推荐）
+### Method 1: Environment Variables (Recommended)
 
 ```bash
-export TENCENTCLOUD_SECRET_ID=你的SecretId
-export TENCENTCLOUD_SECRET_KEY=你的SecretKey
+export TENCENTCLOUD_SECRET_ID=YourSecretId
+export TENCENTCLOUD_SECRET_KEY=YourSecretKey
 ```
 
-### 方式二：命令行参数
+### Method 2: CLI Arguments
 
 ```bash
 python tke_cli.py clusters --secret-id AKIDxxx --secret-key xxxxx --region ap-guangzhou
 ```
 
-## 安装 Skill
+## Install Skill
 
-将 SKILL.md 和 tke_cli.py 复制到你的 Agent 对应的 Skills 目录。以下是常见 Agent 的安装方式：
+Copy SKILL.md and tke_cli.py to the Skills directory of your Agent. Here are the installation instructions for common Agents:
 
 ### OpenClaw
 
 ```bash
-# 将 SKILL.md 和 tke_cli.py 放入 OpenClaw 的 skills 目录
+# Place SKILL.md and tke_cli.py into the OpenClaw skills directory
 mkdir -p skills/tke/
 cp SKILL.md tke_cli.py skills/tke/
 ```
@@ -44,11 +44,11 @@ cp SKILL.md tke_cli.py skills/tke/
 ### CodeBuddy
 
 ```bash
-# 项目级（仅当前项目生效，可随 git 分发）
-mkdir -p <你的项目>/.codebuddy/skills/tke/
-cp SKILL.md tke_cli.py <你的项目>/.codebuddy/skills/tke/
+# Project-level (current project only, can be distributed via git)
+mkdir -p <your-project>/.codebuddy/skills/tke/
+cp SKILL.md tke_cli.py <your-project>/.codebuddy/skills/tke/
 
-# 用户级（全局生效）
+# User-level (global)
 mkdir -p ~/.codebuddy/skills/tke/
 cp SKILL.md tke_cli.py ~/.codebuddy/skills/tke/
 ```
@@ -56,81 +56,81 @@ cp SKILL.md tke_cli.py ~/.codebuddy/skills/tke/
 ### Claude Code
 
 ```bash
-# 项目级
-mkdir -p <你的项目>/.claude/skills/tke/
-cp SKILL.md tke_cli.py <你的项目>/.claude/skills/tke/
+# Project-level
+mkdir -p <your-project>/.claude/skills/tke/
+cp SKILL.md tke_cli.py <your-project>/.claude/skills/tke/
 
-# 用户级
+# User-level
 mkdir -p ~/.claude/skills/tke/
 cp SKILL.md tke_cli.py ~/.claude/skills/tke/
 ```
 
-### 其他 Agent
+### Other Agents
 
-请参考对应 Agent 的 Skill/Prompt 加载机制，将 `SKILL.md` 作为系统提示词加载，并确保 `tke_cli.py` 可被 Agent 执行即可。
+Refer to your Agent's Skill/Prompt loading mechanism. Load `SKILL.md` as a system prompt and ensure `tke_cli.py` is executable by the Agent.
 
-## 使用方式
+## Usage
 
-安装后在 AI Coding Agent 中：
+After installation, in your AI Coding Agent:
 
-- **自动触发**：当你提到 TKE、集群、容器服务相关话题时，Agent 会自动使用此 Skill
-- **手动触发**：输入 `/tke` 后跟你的需求（部分 Agent 支持）
+- **Auto-trigger**: The Agent will automatically use this Skill when you mention TKE, clusters, or container services
+- **Manual trigger**: Type `/tke` followed by your request (supported by some Agents)
 
-### 示例对话
+### Example Conversations
 
 ```
-帮我查一下广州地域的所有集群
-巡检一下集群 cls-xxx 的状态
-获取集群 cls-xxx 的 kubeconfig
+List all clusters in the Guangzhou region
+Check the status of cluster cls-xxx
+Get the kubeconfig for cluster cls-xxx
 ```
 
-## 支持的命令
+## Supported Commands
 
-| 命令 | 说明 | 关键参数 |
-|------|------|---------|
-| `clusters` | 查询集群列表 | `--cluster-ids`, `--cluster-type`, `--limit` |
-| `cluster-status` | 查询集群状态 | `--cluster-ids` |
-| `cluster-level` | 查询集群规格 | `--cluster-id` |
-| `endpoints` | 查询集群访问地址 | `--cluster-id` (必填) |
-| `endpoint-status` | 查询端点状态 | `--cluster-id` (必填), `--is-extranet` |
-| `kubeconfig` | 获取 kubeconfig | `--cluster-id` (必填), `--is-extranet` |
-| `node-pools` | 查询节点池 | `--cluster-id` (必填), `--limit` |
-| `create-endpoint` | 开启集群访问端点 | `--cluster-id` (必填), `--is-extranet`, `--subnet-id`, `--security-group`, `--existed-lb-id`, `--domain`, `--extensive-parameters` |
-| `delete-endpoint` | 关闭集群访问端点 | `--cluster-id` (必填), `--is-extranet` |
+| Command | Description | Key Parameters |
+|---------|-------------|----------------|
+| `clusters` | List clusters | `--cluster-ids`, `--cluster-type`, `--limit` |
+| `cluster-status` | Query cluster status | `--cluster-ids` |
+| `cluster-level` | Query cluster specifications | `--cluster-id` |
+| `endpoints` | Query cluster access endpoints | `--cluster-id` (required) |
+| `endpoint-status` | Query endpoint status | `--cluster-id` (required), `--is-extranet` |
+| `kubeconfig` | Get kubeconfig | `--cluster-id` (required), `--is-extranet` |
+| `node-pools` | Query node pools | `--cluster-id` (required), `--limit` |
+| `create-endpoint` | Enable cluster access endpoint | `--cluster-id` (required), `--is-extranet`, `--subnet-id`, `--security-group`, `--existed-lb-id`, `--domain`, `--extensive-parameters` |
+| `delete-endpoint` | Disable cluster access endpoint | `--cluster-id` (required), `--is-extranet` |
 
-所有命令均支持 `--region`（默认 `ap-guangzhou`）和 `--secret-id` / `--secret-key` 参数。
+All commands support `--region` (default: `ap-guangzhou`) and `--secret-id` / `--secret-key` parameters.
 
-> `create-endpoint` 和 `delete-endpoint` 为写操作，其他命令均为只读查询。
+> `create-endpoint` and `delete-endpoint` are write operations. All other commands are read-only queries.
 
-## 搭配 Kubernetes Specialist Skill 使用
+## Use with Kubernetes Specialist Skill
 
-本 Skill 专注于 TKE 集群的**云平台侧管理**（查询集群、节点池、获取 kubeconfig 等）。如果你需要在集群内进行 **Kubernetes 资源操作**（部署工作负载、配置 Service/Ingress、排查 Pod 问题、编写 YAML 清单、Helm 部署等），推荐安装 [Kubernetes Specialist](https://github.com/jeffallan/claude-skills) Skill 配合使用：
+This Skill focuses on **cloud-side management** of TKE clusters (querying clusters, node pools, getting kubeconfig, etc.). For **in-cluster Kubernetes operations** (deploying workloads, configuring Services/Ingress, troubleshooting Pods, writing YAML manifests, Helm deployments, etc.), it is recommended to install the [Kubernetes Specialist](https://github.com/jeffallan/claude-skills) Skill alongside:
 
 ```bash
 npx skills add https://github.com/jeffallan/claude-skills --skill kubernetes-specialist
 ```
 
-**典型协作流程**：
+**Typical workflow**:
 
-1. 使用 TKE Skill 查询集群信息、获取 kubeconfig
-2. 使用 Kubernetes Specialist Skill 进行集群内的资源部署、故障排查、安全加固等操作
+1. Use TKE Skill to query cluster info and obtain kubeconfig
+2. Use Kubernetes Specialist Skill for in-cluster resource deployment, troubleshooting, and security hardening
 
-两个 Skill 配合可以覆盖从 TKE 集群管理到 K8s 集群内操作的完整运维场景。
+Together, the two Skills cover the full operations spectrum from TKE cluster management to in-cluster K8s operations.
 
-## 直接使用 CLI
+## Standalone CLI Usage
 
-也可以脱离 AI Agent，直接作为命令行工具使用：
+Can also be used as a standalone CLI tool without any AI Agent:
 
 ```bash
-# 查询集群列表
+# List clusters
 python tke_cli.py clusters --region ap-guangzhou
 
-# 查询集群状态
+# Query cluster status
 python tke_cli.py cluster-status --region ap-guangzhou --cluster-ids cls-xxx
 
-# 查询节点池
+# Query node pools
 python tke_cli.py node-pools --region ap-guangzhou --cluster-id cls-xxx
 
-# 获取 kubeconfig
+# Get kubeconfig
 python tke_cli.py kubeconfig --region ap-guangzhou --cluster-id cls-xxx
 ```
