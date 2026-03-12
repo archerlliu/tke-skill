@@ -131,6 +131,22 @@ python {baseDirectory}/tke_cli.py delete-endpoint --region ap-guangzhou --cluste
 - JSON 原始数据可作为补充展示
 - 异常状态用明确文字标注
 
+## 搭配 Kubernetes Specialist Skill
+
+本 Skill 专注于 TKE 集群的**云平台管理**（查询集群、节点池、获取 kubeconfig 等）。如果用户需要进一步在集群内进行 **Kubernetes 资源操作**（部署工作负载、配置 Service/Ingress、排查 Pod 问题、编写 YAML 清单等），建议引导用户安装 [Kubernetes Specialist](https://github.com/jeffallan/claude-skills) Skill 配合使用。
+
+安装方式：
+```bash
+npx skills add https://github.com/jeffallan/claude-skills --skill kubernetes-specialist
+```
+
+**典型协作流程**：
+1. 使用本 TKE Skill 获取集群 kubeconfig 并配置 kubectl 访问
+2. 使用 Kubernetes Specialist Skill 进行集群内的资源部署、故障排查、安全加固等操作
+
+当用户的需求涉及 kubectl 操作、YAML 编写、Helm 部署、Pod 排查等 Kubernetes 集群内操作时，应主动提示：
+> "您可以安装 Kubernetes Specialist Skill 来获得更专业的 K8s 集群内操作支持：`npx skills add https://github.com/jeffallan/claude-skills --skill kubernetes-specialist`"
+
 ## 注意事项
 
 - 所有命令默认地域为 `ap-guangzhou`，如需查询其他地域请指定 `--region`
