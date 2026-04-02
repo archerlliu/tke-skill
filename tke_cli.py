@@ -17,7 +17,12 @@ def get_credentials(args):
     secret_id = getattr(args, 'secret_id', None) or os.getenv("TENCENTCLOUD_SECRET_ID")
     secret_key = getattr(args, 'secret_key', None) or os.getenv("TENCENTCLOUD_SECRET_KEY")
     if not secret_id or not secret_key:
-        print("错误：未提供腾讯云凭证。请通过 --secret-id/--secret-key 参数或环境变量 TENCENTCLOUD_SECRET_ID/TENCENTCLOUD_SECRET_KEY 配置。", file=sys.stderr)
+        print(
+            "错误：未提供腾讯云凭证。"
+            "请通过 --secret-id/--secret-key 参数"
+            "或环境变量 TENCENTCLOUD_SECRET_ID/"
+            "TENCENTCLOUD_SECRET_KEY 配置。",
+            file=sys.stderr)
         sys.exit(1)
     return secret_id, secret_key
 
@@ -364,7 +369,10 @@ def main():
     # clusters
     p = subparsers.add_parser("clusters", parents=[common_parser], help="查询集群列表")
     p.add_argument("--cluster-ids", nargs="*", dest="cluster_ids", help="集群ID列表")
-    p.add_argument("--cluster-type", dest="cluster_type", choices=["MANAGED_CLUSTER", "INDEPENDENT_CLUSTER"], help="集群类型")
+    p.add_argument(
+        "--cluster-type", dest="cluster_type",
+        choices=["MANAGED_CLUSTER", "INDEPENDENT_CLUSTER"],
+        help="集群类型")
     p.add_argument("--limit", type=int, help="最大返回数量（默认20，最大100）")
     p.add_argument("--offset", type=int, help="偏移量")
     p.set_defaults(func=cmd_clusters)
@@ -411,7 +419,9 @@ def main():
     p.add_argument("--security-group", dest="security_group", help="安全组ID（开启外网且不使用已有CLB时必传）")
     p.add_argument("--existed-lb-id", dest="existed_lb_id", help="使用已有CLB的ID")
     p.add_argument("--domain", help="设置域名")
-    p.add_argument("--extensive-parameters", dest="extensive_parameters", help='创建LB参数（JSON字符串，仅外网需要），如：\'{"InternetAccessible":{"InternetChargeType":"TRAFFIC_POSTPAID_BY_HOUR","InternetMaxBandwidthOut":200}}\'')
+    p.add_argument(
+        "--extensive-parameters", dest="extensive_parameters",
+        help="创建LB参数（JSON字符串，仅外网需要）")
     p.set_defaults(func=cmd_create_endpoint)
 
     # delete-endpoint
@@ -425,7 +435,10 @@ def main():
     # tcr-create-instance
     p = subparsers.add_parser("tcr-create-instance", parents=[common_parser], help="创建 TCR 实例")
     p.add_argument("--registry-name", dest="registry_name", required=True, help="实例名称（如 my-tcr）")
-    p.add_argument("--registry-type", dest="registry_type", required=True, choices=["basic", "standard", "premium"], help="实例类型：basic(基础版), standard(标准版), premium(高级版)")
+    p.add_argument(
+        "--registry-type", dest="registry_type", required=True,
+        choices=["basic", "standard", "premium"],
+        help="实例类型：basic(基础版), standard(标准版), premium(高级版)")
     p.add_argument("--charge-type", dest="charge_type", type=int, choices=[0, 1], help="计费类型：0=按量计费（默认），1=预付费")
     p.add_argument("--deletion-protection", dest="deletion_protection", action="store_true", help="开启删除保护")
     p.set_defaults(func=cmd_tcr_create_instance)
@@ -510,7 +523,7 @@ def main():
         args.func(args)
     except KeyboardInterrupt:
         sys.exit(130)
-    except Exception as e:
+    except (json.JSONDecodeError, OSError, ValueError) as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
 

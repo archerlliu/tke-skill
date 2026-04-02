@@ -50,7 +50,7 @@ def resolve_kubeconfig(args):
     2. --cluster-id + --region 从 TKE API 自动获取（显式指定集群）
     3. KUBECONFIG 环境变量
     4. ~/.kube/config 默认路径
-    
+
     设计原则：用户显式指定的参数（1、2）优先于隐式的环境配置（3、4）。
     """
     # 1. --kubeconfig 参数（最高优先级）
@@ -834,7 +834,9 @@ def main():
     common_parser.add_argument("--region", default="ap-guangzhou", help="地域（配合 --cluster-id 使用，默认 ap-guangzhou）")
     common_parser.add_argument("--secret-id", dest="secret_id", help="腾讯云 SecretId（配合 --cluster-id 使用）")
     common_parser.add_argument("--secret-key", dest="secret_key", help="腾讯云 SecretKey（配合 --cluster-id 使用）")
-    common_parser.add_argument("--is-extranet", dest="is_extranet", action="store_true", help="使用外网 kubeconfig（配合 --cluster-id 使用）")
+    common_parser.add_argument(
+        "--is-extranet", dest="is_extranet", action="store_true",
+        help="使用外网 kubeconfig（配合 --cluster-id 使用）")
 
     parser = argparse.ArgumentParser(
         description="Kubernetes & Helm CLI - 轻量级 K8s 集群内操作工具",
@@ -1081,7 +1083,8 @@ def main():
         args.func(args)
     except KeyboardInterrupt:
         sys.exit(130)
-    except Exception as e:
+    except (subprocess.SubprocessError, json.JSONDecodeError,
+            OSError, ValueError) as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
 
