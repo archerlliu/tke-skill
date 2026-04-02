@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-腾讯云 TKE CLI - 轻量级 TKE 集群管理命令行工具
+腾讯云 TKE CLI - 轻量级 TKE 集群管理与 TCR 镜像仓库命令行工具
 
 支持通过环境变量或命令行参数传入腾讯云凭证。
-依赖：pip install tencentcloud-sdk-python-tke
+依赖：pip install tencentcloud-sdk-python-tke tencentcloud-sdk-python-tcr
 """
 
 import argparse
@@ -167,6 +167,172 @@ def cmd_node_pools(args):
     print_json(result)
 
 
+# ========== TCR 镜像仓库命令 ==========
+
+def create_tcr_client(secret_id, secret_key, region):
+    """创建腾讯云 TCR 客户端"""
+    from tencentcloud.common import credential
+    from tencentcloud.common.profile.client_profile import ClientProfile
+    from tencentcloud.common.profile.http_profile import HttpProfile
+    from tencentcloud.common.common_client import CommonClient
+
+    cred = credential.Credential(secret_id, secret_key)
+    http_profile = HttpProfile()
+    http_profile.endpoint = "tcr.tencentcloudapi.com"
+    client_profile = ClientProfile()
+    client_profile.httpProfile = http_profile
+    return CommonClient("tcr", "2019-09-24", cred, region, profile=client_profile)
+
+
+def cmd_tcr_create_instance(args):
+    """创建 TCR 实例"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {
+        "RegistryName": args.registry_name,
+        "RegistryType": args.registry_type,
+    }
+    if args.charge_type is not None:
+        params["RegistryChargeType"] = args.charge_type
+    if args.deletion_protection:
+        params["DeletionProtection"] = True
+    result = call_api(client, "CreateInstance", params)
+    print_json(result)
+
+
+def cmd_tcr_delete_instance(args):
+    """删除 TCR 实例"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {"RegistryId": args.registry_id}
+    if args.delete_bucket:
+        params["DeleteBucket"] = True
+    result = call_api(client, "DeleteInstance", params)
+    print_json(result)
+
+
+def cmd_tcr_instances(args):
+    """查询 TCR 实例列表"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {}
+    if args.instance_name:
+        params["Registryname"] = args.instance_name
+    if args.limit is not None:
+        params["Limit"] = args.limit
+    if args.offset is not None:
+        params["Offset"] = args.offset
+    if args.all_instances:
+        params["AllRegion"] = True
+    result = call_api(client, "DescribeInstances", params)
+    print_json(result)
+
+
+def cmd_tcr_repos(args):
+    """查询镜像仓库列表"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {"RegistryId": args.registry_id}
+    if args.namespace_name:
+        params["NamespaceName"] = args.namespace_name
+    if args.repository_name:
+        params["RepositoryName"] = args.repository_name
+    if args.limit is not None:
+        params["Limit"] = args.limit
+    if args.offset is not None:
+        params["Offset"] = args.offset
+    result = call_api(client, "DescribeRepositories", params)
+    print_json(result)
+
+
+def cmd_tcr_create_repo(args):
+    """创建镜像仓库"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {
+        "RegistryId": args.registry_id,
+        "NamespaceName": args.namespace_name,
+        "RepositoryName": args.repository_name,
+    }
+    if args.brief_description:
+        params["BriefDescription"] = args.brief_description
+    if args.description:
+        params["Description"] = args.description
+    result = call_api(client, "CreateRepository", params)
+    print_json(result)
+
+
+def cmd_tcr_delete_repo(args):
+    """删除镜像仓库"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {
+        "RegistryId": args.registry_id,
+        "NamespaceName": args.namespace_name,
+        "RepositoryName": args.repository_name,
+    }
+    result = call_api(client, "DeleteRepository", params)
+    print_json(result)
+
+
+def cmd_tcr_images(args):
+    """查询镜像版本列表"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {
+        "RegistryId": args.registry_id,
+        "NamespaceName": args.namespace_name,
+        "RepositoryName": args.repository_name,
+    }
+    if args.image_version:
+        params["ImageVersion"] = args.image_version
+    if args.limit is not None:
+        params["Limit"] = args.limit
+    if args.offset is not None:
+        params["Offset"] = args.offset
+    result = call_api(client, "DescribeImages", params)
+    print_json(result)
+
+
+def cmd_tcr_namespaces(args):
+    """查询 TCR 命名空间列表"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {"RegistryId": args.registry_id}
+    if args.namespace_name:
+        params["NamespaceName"] = args.namespace_name
+    if args.limit is not None:
+        params["Limit"] = args.limit
+    if args.offset is not None:
+        params["Offset"] = args.offset
+    result = call_api(client, "DescribeNamespaces", params)
+    print_json(result)
+
+
+def cmd_tcr_create_ns(args):
+    """创建 TCR 命名空间"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {
+        "RegistryId": args.registry_id,
+        "NamespaceName": args.namespace_name,
+        "IsPublic": args.is_public,
+    }
+    result = call_api(client, "CreateNamespace", params)
+    print_json(result)
+
+
+def cmd_tcr_delete_ns(args):
+    """删除 TCR 命名空间"""
+    secret_id, secret_key = get_credentials(args)
+    client = create_tcr_client(secret_id, secret_key, args.region)
+    params = {
+        "RegistryId": args.registry_id,
+        "NamespaceName": args.namespace_name,
+    }
+    result = call_api(client, "DeleteNamespace", params)
+    print_json(result)
+
 
 # ========== 主入口 ==========
 
@@ -178,7 +344,7 @@ def main():
     common_parser.add_argument("--secret-key", dest="secret_key", help="腾讯云 SecretKey（优先于环境变量）")
 
     parser = argparse.ArgumentParser(
-        description="腾讯云 TKE CLI - 轻量级集群管理工具",
+        description="腾讯云 TKE CLI - 集群管理与 TCR 镜像仓库工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -187,6 +353,9 @@ def main():
   python tke_cli.py endpoints --cluster-id cls-xxx --region ap-beijing
   python tke_cli.py kubeconfig --cluster-id cls-xxx
   python tke_cli.py node-pools --cluster-id cls-xxx
+  python tke_cli.py tcr-instances --region ap-guangzhou
+  python tke_cli.py tcr-repos --registry-id tcr-xxx --namespace-name my-ns
+  python tke_cli.py tcr-images --registry-id tcr-xxx --namespace-name my-ns --repository-name my-app
 """
     )
 
@@ -250,6 +419,86 @@ def main():
     p.add_argument("--cluster-id", dest="cluster_id", required=True, help="集群ID")
     p.add_argument("--is-extranet", dest="is_extranet", action="store_true", help="是否关闭外网访问（默认关闭内网）")
     p.set_defaults(func=cmd_delete_endpoint)
+
+    # ---- TCR 镜像仓库命令 ----
+
+    # tcr-create-instance
+    p = subparsers.add_parser("tcr-create-instance", parents=[common_parser], help="创建 TCR 实例")
+    p.add_argument("--registry-name", dest="registry_name", required=True, help="实例名称（如 my-tcr）")
+    p.add_argument("--registry-type", dest="registry_type", required=True, choices=["basic", "standard", "premium"], help="实例类型：basic(基础版), standard(标准版), premium(高级版)")
+    p.add_argument("--charge-type", dest="charge_type", type=int, choices=[0, 1], help="计费类型：0=按量计费（默认），1=预付费")
+    p.add_argument("--deletion-protection", dest="deletion_protection", action="store_true", help="开启删除保护")
+    p.set_defaults(func=cmd_tcr_create_instance)
+
+    # tcr-delete-instance
+    p = subparsers.add_parser("tcr-delete-instance", parents=[common_parser], help="删除 TCR 实例")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--delete-bucket", dest="delete_bucket", action="store_true", help="同时删除关联的 COS 存储桶")
+    p.set_defaults(func=cmd_tcr_delete_instance)
+
+    # tcr-instances
+    p = subparsers.add_parser("tcr-instances", parents=[common_parser], help="查询 TCR 实例列表")
+    p.add_argument("--instance-name", dest="instance_name", help="按实例名称筛选")
+    p.add_argument("--limit", type=int, help="最大返回数量")
+    p.add_argument("--offset", type=int, help="偏移量")
+    p.add_argument("--all-instances", dest="all_instances", action="store_true", help="查看所有地域的实例")
+    p.set_defaults(func=cmd_tcr_instances)
+
+    # tcr-repos
+    p = subparsers.add_parser("tcr-repos", parents=[common_parser], help="查询镜像仓库列表")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", help="命名空间名称")
+    p.add_argument("--repository-name", dest="repository_name", help="仓库名称（模糊匹配）")
+    p.add_argument("--limit", type=int, help="最大返回数量")
+    p.add_argument("--offset", type=int, help="偏移量")
+    p.set_defaults(func=cmd_tcr_repos)
+
+    # tcr-create-repo
+    p = subparsers.add_parser("tcr-create-repo", parents=[common_parser], help="创建镜像仓库")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", required=True, help="命名空间名称")
+    p.add_argument("--repository-name", dest="repository_name", required=True, help="仓库名称")
+    p.add_argument("--brief-description", dest="brief_description", help="简短描述")
+    p.add_argument("--description", help="详细描述")
+    p.set_defaults(func=cmd_tcr_create_repo)
+
+    # tcr-delete-repo
+    p = subparsers.add_parser("tcr-delete-repo", parents=[common_parser], help="删除镜像仓库")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", required=True, help="命名空间名称")
+    p.add_argument("--repository-name", dest="repository_name", required=True, help="仓库名称")
+    p.set_defaults(func=cmd_tcr_delete_repo)
+
+    # tcr-images
+    p = subparsers.add_parser("tcr-images", parents=[common_parser], help="查询镜像版本列表")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", required=True, help="命名空间名称")
+    p.add_argument("--repository-name", dest="repository_name", required=True, help="仓库名称")
+    p.add_argument("--image-version", dest="image_version", help="镜像版本/Tag（模糊匹配）")
+    p.add_argument("--limit", type=int, help="最大返回数量")
+    p.add_argument("--offset", type=int, help="偏移量")
+    p.set_defaults(func=cmd_tcr_images)
+
+    # tcr-namespaces
+    p = subparsers.add_parser("tcr-namespaces", parents=[common_parser], help="查询 TCR 命名空间列表")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", help="命名空间名称（模糊匹配）")
+    p.add_argument("--limit", type=int, help="最大返回数量")
+    p.add_argument("--offset", type=int, help="偏移量")
+    p.set_defaults(func=cmd_tcr_namespaces)
+
+    # tcr-create-ns
+    p = subparsers.add_parser("tcr-create-ns", parents=[common_parser], help="创建 TCR 命名空间")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", required=True, help="命名空间名称")
+    p.add_argument("--is-public", dest="is_public", action="store_true", default=False, help="是否为公开命名空间（默认私有）")
+    p.set_defaults(func=cmd_tcr_create_ns)
+
+    # tcr-delete-ns
+    p = subparsers.add_parser("tcr-delete-ns", parents=[common_parser], help="删除 TCR 命名空间")
+    p.add_argument("--registry-id", dest="registry_id", required=True, help="TCR 实例 ID")
+    p.add_argument("--namespace-name", dest="namespace_name", required=True, help="命名空间名称")
+    p.set_defaults(func=cmd_tcr_delete_ns)
 
     args = parser.parse_args()
 
