@@ -713,6 +713,369 @@ python k8s_cli.py get pods -n {args.namespace}
     print(prompt)
 
 
+# ========== 节点诊断命令 ==========
+
+# 默认配置
+_NODE_DEBUG_IMAGE = "busybox"
+_NODE_DEBUG_NAMESPACE = "default"
+_ATOP_LOG_DIR = "/var/log/atop"
+
+
+def _node_debug_run(node, exec_cmd, args, timeout=60):
+    """
+    在节点 debug pod 中执行单条命令，返回 (stdout, stderr, returncode)。
+    流程：kubectl debug node/<node> --attach=false 创建 pod
+          -> 从 stderr 解析 pod 名 -> wait Ready -> exec -> 删除 pod。
+    """
+    check_binary("kubectl")
+    image = getattr(args, 'image', None) or _NODE_DEBUG_IMAGE
+    namespace = getattr(args, 'namespace', None) or _NODE_DEBUG_NAMESPACE
+    kubeconfig_args = build_kubeconfig_args(args)
+
+    # 1. 创建 debug pod（非交互）
+    # pod 名称由 kubectl 自动生成，从 stderr 解析：
+    #   "Creating debugging pod node-debugger-<node>-<suffix> ..."
+    create_cmd = [
+        "kubectl", "debug", f"node/{node}",
+        "--image", image,
+        "-n", namespace,
+        "--attach=false",
+        "--profile=general",
+    ] + kubeconfig_args + [
+        "--", "sleep", str(timeout + 60),
+    ]
+
+    print(f"[info] 在节点 {node} 上创建 debug pod...", file=sys.stderr)
+    result = subprocess.run(create_cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"错误：创建 debug pod 失败:\n{result.stderr.strip()}",
+              file=sys.stderr)
+        sys.exit(result.returncode)
+
+    # 从 stderr 解析 pod 名称
+    # 输出示例：Creating debugging pod node-debugger-10.0.4.147-abc12 with ...
+    actual_pod = None
+    for line in (result.stdout + result.stderr).splitlines():
+        if "Creating debugging pod" in line:
+            parts = line.split()
+            # 格式：Creating debugging pod <pod-name> with ...
+            for i, part in enumerate(parts):
+                if part == "pod" and i + 1 < len(parts):
+                    actual_pod = parts[i + 1]
+                    break
+        if actual_pod:
+            break
+
+    if not actual_pod:
+        print("错误：无法从输出中解析 debug pod 名称。\n"
+              f"kubectl 输出：{result.stdout}\n{result.stderr}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[info] debug pod: {actual_pod}，等待就绪...", file=sys.stderr)
+
+    try:
+        # 2. 等待 pod Running（用 jsonpath poll，debug pod 没有 readiness probe）
+        import time
+        deadline = time.time() + timeout
+        pod_running = False
+        while time.time() < deadline:
+            status_cmd = [
+                "kubectl", "get", f"pod/{actual_pod}",
+                "-n", namespace,
+                "-o", "jsonpath={.status.phase}",
+            ] + kubeconfig_args
+            status_result = subprocess.run(
+                status_cmd, capture_output=True, text=True
+            )
+            if status_result.stdout.strip() == "Running":
+                pod_running = True
+                break
+            time.sleep(2)
+        if not pod_running:
+            print(f"错误：等待 debug pod 就绪超时（{timeout}s）",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        # 3. exec 执行命令（宿主机文件系统挂载在 /host）
+        exec_full_cmd = [
+            "kubectl", "exec", actual_pod,
+            "-n", namespace,
+            "--",
+        ] + exec_cmd + kubeconfig_args
+
+        print(f"[info] 执行诊断命令...", file=sys.stderr)
+        exec_result = subprocess.run(
+            exec_full_cmd, capture_output=True, text=True
+        )
+        return exec_result.stdout, exec_result.stderr, exec_result.returncode
+    finally:
+        # 4. 清理 debug pod
+        del_cmd = [
+            "kubectl", "delete", "pod", actual_pod,
+            "-n", namespace, "--ignore-not-found",
+        ] + kubeconfig_args
+        subprocess.run(del_cmd, capture_output=True, text=True)
+        print(f"[info] 已清理 debug pod: {actual_pod}", file=sys.stderr)
+
+
+def cmd_node_debug_shell(args):
+    """进入节点交互式 shell（提示用户手动执行）"""
+    node = args.node
+    image = getattr(args, 'image', None) or _NODE_DEBUG_IMAGE
+    kubeconfig_str = ""
+    kubeconfig = resolve_kubeconfig(args)
+    if kubeconfig:
+        kubeconfig_str = f" --kubeconfig {kubeconfig}"
+
+    print(f"""
+[提示] 交互式 shell 需在终端直接执行以下命令：
+
+  kubectl debug node/{node} -it --image={image}{kubeconfig_str}
+
+进入容器后，宿主机文件系统挂载在 /host，可执行：
+  chroot /host         # 切换到宿主机根目录
+  dmesg -T             # 内核日志
+  journalctl -u kubelet -n 100
+  crictl ps            # 容器状态
+  cat /var/log/atop/atop_$(date +%Y%m%d)  # atop 日志
+""")
+
+
+def cmd_node_debug_dmesg(args):
+    """查看节点内核日志（dmesg）"""
+    node = args.node
+    tail = getattr(args, 'tail', None)
+    # 宿主机文件系统在 /host，通过 chroot 执行 dmesg
+    cmd = ["chroot", "/host", "dmesg", "-T"]
+    if tail:
+        cmd += ["|", "tail", "-n", str(tail)]
+        # 避免 shell=True，改用 sh -c
+        cmd = ["chroot", "/host", "sh", "-c",
+               f"dmesg -T | tail -n {tail}"]
+    stdout, stderr, rc = _node_debug_run(node, cmd, args)
+    if stdout:
+        print(stdout, end='')
+    if rc != 0 and stderr:
+        print(stderr, end='', file=sys.stderr)
+        sys.exit(rc)
+
+
+def cmd_node_debug_kubelet_logs(args):
+    """查看节点 kubelet 日志"""
+    node = args.node
+    tail = getattr(args, 'tail', 100)
+    since = getattr(args, 'since', None)
+
+    journalctl_cmd = f"journalctl -u kubelet -n {tail} --no-pager"
+    if since:
+        journalctl_cmd += f" --since '{since}'"
+    cmd = ["chroot", "/host", "sh", "-c", journalctl_cmd]
+
+    stdout, stderr, rc = _node_debug_run(node, cmd, args)
+    if stdout:
+        print(stdout, end='')
+    if rc != 0 and stderr:
+        print(stderr, end='', file=sys.stderr)
+        sys.exit(rc)
+
+
+def cmd_node_debug_crictl(args):
+    """查看节点容器运行时状态（crictl ps）"""
+    node = args.node
+    all_containers = getattr(args, 'all_containers', False)
+
+    crictl_cmd = "crictl ps"
+    if all_containers:
+        crictl_cmd += " -a"
+    cmd = ["chroot", "/host", "sh", "-c", crictl_cmd]
+
+    stdout, stderr, rc = _node_debug_run(node, cmd, args)
+    if stdout:
+        print(stdout, end='')
+    if rc != 0 and stderr:
+        print(stderr, end='', file=sys.stderr)
+        sys.exit(rc)
+
+
+def cmd_node_debug_atop(args):
+    """获取节点 atop 日志文件（二进制，通过 kubectl cp 传输）"""
+    import datetime
+    check_binary("kubectl")
+    node = args.node
+    atop_dir = getattr(args, 'atop_dir', None) or _ATOP_LOG_DIR
+    date_str = getattr(args, 'date', None)
+    output_file = getattr(args, 'output_file', None)
+    image = getattr(args, 'image', None) or _NODE_DEBUG_IMAGE
+    namespace = getattr(args, 'namespace', None) or _NODE_DEBUG_NAMESPACE
+    kubeconfig_args = build_kubeconfig_args(args)
+
+    if not date_str:
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+
+    atop_path = f"{atop_dir}/atop_{date_str}"
+    local_out = output_file or f"atop_{node.replace('/', '-')}_{date_str}.log"
+
+    print(f"[info] 读取节点 {node} 的 atop 日志: {atop_path}",
+          file=sys.stderr)
+
+    # 1. 创建 debug pod
+    create_cmd = [
+        "kubectl", "debug", f"node/{node}",
+        "--image", image,
+        "-n", namespace,
+        "--attach=false",
+        "--profile=general",
+    ] + kubeconfig_args + ["--", "sleep", "120"]
+
+    result = subprocess.run(create_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"错误：创建 debug pod 失败: {result.stderr.strip()}",
+              file=sys.stderr)
+        sys.exit(result.returncode)
+
+    actual_pod = None
+    for line in (result.stdout + result.stderr).splitlines():
+        if "Creating debugging pod" in line:
+            parts = line.split()
+            for i, part in enumerate(parts):
+                if part == "pod" and i + 1 < len(parts):
+                    actual_pod = parts[i + 1]
+                    break
+        if actual_pod:
+            break
+
+    if not actual_pod:
+        print("错误：无法解析 debug pod 名称。", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[info] debug pod: {actual_pod}，等待就绪...", file=sys.stderr)
+
+    try:
+        # 2. 等待 Running
+        import time
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            s = subprocess.run(
+                ["kubectl", "get", f"pod/{actual_pod}",
+                 "-n", namespace, "-o", "jsonpath={.status.phase}"]
+                + kubeconfig_args,
+                capture_output=True, text=True
+            )
+            if s.stdout.strip() == "Running":
+                break
+            time.sleep(2)
+        else:
+            print("错误：等待 debug pod 就绪超时。", file=sys.stderr)
+            sys.exit(1)
+
+        # 3. 先检查文件是否存在
+        check = subprocess.run(
+            ["kubectl", "exec", actual_pod, "-n", namespace, "--",
+             "sh", "-c", f"test -f /host{atop_path} && echo ok || echo missing"]
+            + kubeconfig_args,
+            capture_output=True, text=True
+        )
+        if check.stdout.strip() != "ok":
+            print(f"错误：节点上文件不存在: {atop_path}", file=sys.stderr)
+            sys.exit(1)
+
+        # 4. kubectl cp 直接拷贝二进制文件（保留完整内容）
+        src = f"{namespace}/{actual_pod}:/host{atop_path}"
+        cp_cmd = ["kubectl", "cp", src, local_out] + kubeconfig_args
+        print(f"[info] 通过 kubectl cp 下载二进制日志...", file=sys.stderr)
+        cp_result = subprocess.run(cp_cmd, capture_output=True, text=True)
+        if cp_result.returncode != 0:
+            print(f"错误：拷贝失败: {cp_result.stderr.strip()}",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        import os
+        size = os.path.getsize(local_out)
+        print(f"[info] atop 日志已保存到: {local_out} ({size} bytes)")
+
+    finally:
+        subprocess.run(
+            ["kubectl", "delete", "pod", actual_pod,
+             "-n", namespace, "--ignore-not-found"] + kubeconfig_args,
+            capture_output=True, text=True
+        )
+        print(f"[info] 已清理 debug pod: {actual_pod}", file=sys.stderr)
+
+
+def cmd_node_debug_diagnose(args):
+    """一键诊断节点（汇总 dmesg + kubelet 日志 + crictl 状态）"""
+    node = args.node
+    separator = "=" * 60
+
+    sections = [
+        ("dmesg（最近 50 行）",
+         ["chroot", "/host", "sh", "-c", "dmesg -T | tail -n 50"]),
+        ("kubelet 日志（最近 50 行）",
+         ["chroot", "/host", "sh", "-c",
+          "journalctl -u kubelet -n 50 --no-pager"]),
+        ("容器运行时状态（crictl ps）",
+         ["chroot", "/host", "sh", "-c", "crictl ps 2>/dev/null || "
+          "echo 'crictl 不可用'"]),
+        ("磁盘使用（df -h）",
+         ["chroot", "/host", "sh", "-c", "df -h"]),
+        ("内存使用（free -h）",
+         ["chroot", "/host", "sh", "-c", "free -h"]),
+    ]
+
+    print(f"\n{separator}")
+    print(f"  节点诊断报告: {node}")
+    print(f"{separator}\n")
+
+    for title, cmd in sections:
+        print(f"\n--- {title} ---")
+        stdout, stderr, rc = _node_debug_run(node, cmd, args)
+        if stdout:
+            print(stdout, end='')
+        elif stderr:
+            print(f"[warn] {stderr.strip()}", file=sys.stderr)
+
+
+def cmd_node_debug_cleanup(args):
+    """清理所有遗留的节点 debug pod"""
+    check_binary("kubectl")
+    namespace = getattr(args, 'namespace', None) or _NODE_DEBUG_NAMESPACE
+    kubeconfig_args = build_kubeconfig_args(args)
+
+    # kubectl debug node 创建的 pod 名称以 node-debugger- 开头
+    list_cmd = [
+        "kubectl", "get", "pods",
+        "-n", namespace,
+        "--field-selector=status.phase!=Running",
+        "-o", "jsonpath={.items[*].metadata.name}",
+    ] + kubeconfig_args
+
+    result = subprocess.run(list_cmd, capture_output=True, text=True)
+    # 同时列出 Running 的 debug pod（名称包含 node-debugger）
+    list_all_cmd = [
+        "kubectl", "get", "pods",
+        "-n", namespace,
+        "-o", "jsonpath={.items[*].metadata.name}",
+    ] + kubeconfig_args
+    result_all = subprocess.run(list_all_cmd, capture_output=True, text=True)
+
+    all_pods = result_all.stdout.split()
+    debug_pods = [p for p in all_pods if "node-debugger" in p or
+                  p.startswith("node-debug-")]
+
+    if not debug_pods:
+        print("未找到遗留的 node debug pod。")
+        return
+
+    print(f"找到 {len(debug_pods)} 个 debug pod：{', '.join(debug_pods)}")
+    del_cmd = [
+        "kubectl", "delete", "pod",
+    ] + debug_pods + ["-n", namespace] + kubeconfig_args
+    run_command(del_cmd)
+    print("清理完成。")
+
+
 # ========== Helm 操作命令 ==========
 
 def cmd_helm_install(args):
@@ -997,6 +1360,86 @@ def main():
     p.add_argument("--cluster-name", dest="cluster_name", help="集群显示名称（默认 tke-cluster）")
     p.add_argument("--duration", help="Token 有效期（默认 8760h）")
     p.set_defaults(func=cmd_prompt_generate)
+
+    # ---- 节点诊断 ----
+
+    # node-debug（主命令）
+    p_nd = subparsers.add_parser(
+        "node-debug", parents=[common_parser], help="节点诊断与排障")
+    nd_sub = p_nd.add_subparsers(dest="node_debug_cmd", help="节点诊断子命令")
+
+    # node-debug shell
+    p = nd_sub.add_parser("shell", help="输出进入节点交互式 shell 的命令")
+    p.add_argument("node", help="节点名称")
+    p.add_argument(
+        "-i", "--image", default=None,
+        help=f"debug 镜像（默认 {_NODE_DEBUG_IMAGE}）")
+    p.set_defaults(func=cmd_node_debug_shell)
+
+    # node-debug dmesg
+    p = nd_sub.add_parser("dmesg", help="查看节点内核日志")
+    p.add_argument("node", help="节点名称")
+    p.add_argument("--tail", type=int, default=None, help="显示最后 N 行")
+    p.add_argument(
+        "-i", "--image", default=None,
+        help=f"debug 镜像（默认 {_NODE_DEBUG_IMAGE}）")
+    p.set_defaults(func=cmd_node_debug_dmesg)
+
+    # node-debug kubelet-logs
+    p = nd_sub.add_parser("kubelet-logs", help="查看节点 kubelet 日志")
+    p.add_argument("node", help="节点名称")
+    p.add_argument("--tail", type=int, default=100, help="显示最后 N 行（默认100）")
+    p.add_argument("--since", default=None, help="起始时间（如 '1 hour ago'）")
+    p.add_argument(
+        "-i", "--image", default=None,
+        help=f"debug 镜像（默认 {_NODE_DEBUG_IMAGE}）")
+    p.set_defaults(func=cmd_node_debug_kubelet_logs)
+
+    # node-debug crictl-status
+    p = nd_sub.add_parser("crictl-status", help="查看节点容器运行时状态")
+    p.add_argument("node", help="节点名称")
+    p.add_argument(
+        "-a", "--all", dest="all_containers", action="store_true",
+        help="显示所有容器（包括已退出）")
+    p.add_argument(
+        "-i", "--image", default=None,
+        help=f"debug 镜像（默认 {_NODE_DEBUG_IMAGE}）")
+    p.set_defaults(func=cmd_node_debug_crictl)
+
+    # node-debug atop
+    p = nd_sub.add_parser("atop", help="获取节点 atop 日志文件")
+    p.add_argument("node", help="节点名称")
+    p.add_argument(
+        "--date", default=None,
+        help="日志日期，格式 YYYYMMDD（默认今天）")
+    p.add_argument(
+        "--atop-dir", dest="atop_dir", default=None,
+        help=f"atop 日志目录（默认 {_ATOP_LOG_DIR}）")
+    p.add_argument(
+        "-o", "--output-file", dest="output_file", default=None,
+        help="保存到指定文件（默认保存到当前目录）")
+    p.add_argument(
+        "-i", "--image", default=None,
+        help=f"debug 镜像（默认 {_NODE_DEBUG_IMAGE}）")
+    p.set_defaults(func=cmd_node_debug_atop)
+
+    # node-debug diagnose
+    p = nd_sub.add_parser("diagnose", help="一键诊断节点（汇总多项信息）")
+    p.add_argument("node", help="节点名称")
+    p.add_argument(
+        "-i", "--image", default=None,
+        help=f"debug 镜像（默认 {_NODE_DEBUG_IMAGE}）")
+    p.set_defaults(func=cmd_node_debug_diagnose)
+
+    # node-debug cleanup
+    p = nd_sub.add_parser("cleanup", help="清理遗留的 node debug pod")
+    p.set_defaults(func=cmd_node_debug_cleanup)
+
+    # node-debug 主命令处理（未指定子命令时打印帮助）
+    p_nd.set_defaults(func=lambda a: (
+        nd_sub.choices[a.node_debug_cmd].print_help()
+        if getattr(a, 'node_debug_cmd', None) else p_nd.print_help()
+    ))
 
     # ---- Helm 操作 ----
 
