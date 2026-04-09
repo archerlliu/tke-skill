@@ -754,7 +754,7 @@ def _node_debug_run(node, exec_cmd, args, timeout=60):
         sys.exit(result.returncode)
 
     # 从 stderr 解析 pod 名称
-    # 输出示例：Creating debugging pod node-debugger-10.0.4.147-abc12 with ...
+    # 输出示例：Creating debugging pod node-debugger-<node>-<suffix> with ...
     actual_pod = None
     for line in (result.stdout + result.stderr).splitlines():
         if "Creating debugging pod" in line:
