@@ -3,7 +3,7 @@
 腾讯云 TKE CLI - 轻量级 TKE 集群管理与 TCR 镜像仓库命令行工具
 
 支持通过环境变量或命令行参数传入腾讯云凭证。
-依赖：pip install tencentcloud-sdk-python-tke tencentcloud-sdk-python-tcr
+依赖：pip install tencentcloud-sdk-python-tke==3.1.73 tencentcloud-sdk-python-tcr==3.1.64
 """
 
 import argparse
@@ -24,6 +24,12 @@ def get_credentials(args):
             "TENCENTCLOUD_SECRET_KEY 配置。",
             file=sys.stderr)
         sys.exit(1)
+    # 凭证来自命令行参数时警告：命令行参数会暴露在进程列表中
+    if getattr(args, 'secret_id', None) or getattr(args, 'secret_key', None):
+        print(
+            "[warn] 检测到凭证通过命令行参数传入，这会暴露在进程列表（ps aux）中。"
+            "建议改用环境变量：export TENCENTCLOUD_SECRET_ID=xxx TENCENTCLOUD_SECRET_KEY=xxx",
+            file=sys.stderr)
     return secret_id, secret_key
 
 

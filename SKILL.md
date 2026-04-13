@@ -15,8 +15,16 @@ allowed-tools: Read, Bash, Write
 
 ### 腾讯云凭证（tke_cli.py 使用）
 支持两种方式（命令行参数优先）：
-1. **环境变量**：`TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`
-2. **命令行参数**：`--secret-id` / `--secret-key`
+1. **环境变量（推荐）**：`TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY`
+2. **命令行参数（不推荐）**：`--secret-id` / `--secret-key`
+
+> **安全提示**：命令行参数方式会将凭证暴露在进程列表（`ps aux`）中，存在泄露风险。
+> 请优先使用环境变量传递凭证：
+> ```bash
+> export TENCENTCLOUD_SECRET_ID=your-secret-id
+> export TENCENTCLOUD_SECRET_KEY=your-secret-key
+> ```
+> kubeconfig 文件（`~/.kube/config`）包含集群访问凭证，请确保文件权限为 `600`（`chmod 600 ~/.kube/config`）。
 
 ### Kubeconfig（k8s_cli.py 使用）
 支持四级优先级（自动解析）：
@@ -30,8 +38,8 @@ allowed-tools: Read, Bash, Write
 | 工具 | 用途 | 安装 |
 |------|------|------|
 | Python 3 | 运行脚本 | 系统自带 |
-| tencentcloud-sdk-python-tke | TKE 云 API | `pip install tencentcloud-sdk-python-tke` |
-| tencentcloud-sdk-python-tcr | TCR 云 API | `pip install tencentcloud-sdk-python-tcr` |
+| tencentcloud-sdk-python-tke | TKE 云 API | `pip install tencentcloud-sdk-python-tke==3.1.73` |
+| tencentcloud-sdk-python-tcr | TCR 云 API | `pip install tencentcloud-sdk-python-tcr==3.1.64` |
 | kubectl | K8s 资源操作 | [安装指南](https://kubernetes.io/docs/tasks/tools/) |
 | helm | Helm 包管理 | [安装指南](https://helm.sh/docs/intro/install/) |
 

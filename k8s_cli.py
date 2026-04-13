@@ -136,6 +136,21 @@ def fetch_kubeconfig_from_tke(args):
     return tmp.name
 
 
+def confirm_action(description, auto_yes=False):
+    """写操作二次确认，auto_yes=True 时跳过（-y 参数或 dry-run 模式）"""
+    if auto_yes:
+        return
+    print(f"即将执行写操作：{description}")
+    try:
+        answer = input("确认执行？[y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消。", file=sys.stderr)
+        sys.exit(1)
+    if answer != 'y':
+        print("已取消。", file=sys.stderr)
+        sys.exit(1)
+
+
 def run_command(cmd, env=None):
     """执行命令并输出结果"""
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -203,6 +218,9 @@ def cmd_describe(args):
 def cmd_apply(args):
     """应用 YAML 资源清单"""
     check_binary("kubectl")
+    is_dry_run = bool(getattr(args, 'dry_run', None))
+    target = args.filename or args.kustomize or "(未指定文件)"
+    confirm_action(f"kubectl apply {target} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
     cmd = ["kubectl", "apply"]
     if args.filename:
         cmd.extend(["-f", args.filename])
@@ -220,6 +238,9 @@ def cmd_apply(args):
 def cmd_delete(args):
     """删除 K8s 资源"""
     check_binary("kubectl")
+    is_dry_run = bool(getattr(args, 'dry_run', None))
+    target = args.name or args.selector or args.filename or "(全部匹配)"
+    confirm_action(f"kubectl delete {args.resource} {target} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
     cmd = ["kubectl", "delete", args.resource]
     if args.name:
         cmd.append(args.name)
@@ -240,6 +261,8 @@ def cmd_delete(args):
 def cmd_create(args):
     """快速创建 K8s 资源"""
     check_binary("kubectl")
+    is_dry_run = bool(getattr(args, 'dry_run', None))
+    confirm_action(f"kubectl create {args.resource} {args.name} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
     cmd = ["kubectl", "create", args.resource, args.name]
     cmd.extend(["-n", args.namespace])
     if args.image:
@@ -306,6 +329,7 @@ def cmd_logs(args):
 def cmd_exec(args):
     """在容器中执行单条命令"""
     check_binary("kubectl")
+    confirm_action(f"kubectl exec {args.pod} -n {args.namespace} -- {' '.join(args._exec_command)}", auto_yes=getattr(args, 'yes', False))
     cmd = ["kubectl", "exec", args.pod]
     cmd.extend(["-n", args.namespace])
     if args.container:
@@ -390,6 +414,8 @@ def cmd_kubeconfig_add(args):
         # 仅预览合并结果，不写入文件
         print(result.stdout, end='')
         return
+
+    confirm_action(f"将 {source} 合并写入 {target}", auto_yes=getattr(args, 'yes', False))
 
     # 写回目标文件
     os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
@@ -526,6 +552,9 @@ def cmd_rbac_create_tenant(args):
     """创建租户（ServiceAccount + Role + RoleBinding）"""
     check_binary("kubectl")
 
+    is_dry_run = bool(getattr(args, 'dry_run', None))
+    confirm_action(f"rbac-create-tenant {args.tenant_name} --role {args.role} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
+
     template = load_rbac_template(args.role, getattr(args, 'rules_file', None))
     yaml_content = generate_rbac_yaml(args.tenant_name, args.namespace, template)
 
@@ -589,6 +618,8 @@ def cmd_rbac_list_tenants(args):
 def cmd_rbac_delete_tenant(args):
     """删除租户的所有 RBAC 资源"""
     check_binary("kubectl")
+
+    confirm_action(f"rbac-delete-tenant {args.tenant_name} -n {args.namespace}（将删除 RoleBinding/Role/ServiceAccount）", auto_yes=getattr(args, 'yes', False))
 
     label_selector = f"tke-skill/tenant={args.tenant_name},app.kubernetes.io/managed-by=tke-skill"
 
@@ -1081,6 +1112,8 @@ def cmd_node_debug_cleanup(args):
 def cmd_helm_install(args):
     """安装 Helm Chart"""
     check_binary("helm")
+    is_dry_run = getattr(args, 'dry_run', False)
+    confirm_action(f"helm install {args.release} {args.chart} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
     cmd = ["helm", "install", args.release, args.chart]
     cmd.extend(["-n", args.namespace])
     if args.create_namespace:
@@ -1110,6 +1143,8 @@ def cmd_helm_install(args):
 def cmd_helm_upgrade(args):
     """升级 Helm Release"""
     check_binary("helm")
+    is_dry_run = getattr(args, 'dry_run', False)
+    confirm_action(f"helm upgrade {args.release} {args.chart} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
     cmd = ["helm", "upgrade", args.release, args.chart]
     cmd.extend(["-n", args.namespace])
     if args.install:
@@ -1141,6 +1176,8 @@ def cmd_helm_upgrade(args):
 def cmd_helm_uninstall(args):
     """卸载 Helm Release"""
     check_binary("helm")
+    is_dry_run = getattr(args, 'dry_run', False)
+    confirm_action(f"helm uninstall {args.release} -n {args.namespace}", auto_yes=getattr(args, 'yes', False) or is_dry_run)
     cmd = ["helm", "uninstall", args.release]
     cmd.extend(["-n", args.namespace])
     if args.keep_history:
@@ -1243,6 +1280,7 @@ def main():
     p.add_argument("-k", "--kustomize", help="Kustomize 目录路径")
     p.add_argument("--dry-run", dest="dry_run", choices=["client", "server"], help="试运行模式")
     p.add_argument("--server-side", dest="server_side", action="store_true", help="服务端 apply")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_apply)
 
     # delete
@@ -1253,6 +1291,7 @@ def main():
     p.add_argument("-l", "--selector", help="标签选择器")
     p.add_argument("--force", action="store_true", help="强制删除")
     p.add_argument("--cascade", choices=["background", "orphan", "foreground"], help="级联删除策略")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_delete)
 
     # create
@@ -1264,6 +1303,7 @@ def main():
     p.add_argument("--port", type=int, help="端口")
     p.add_argument("--dry-run", dest="dry_run", choices=["client", "server"], help="试运行模式")
     p.add_argument("-o", "--output", help="输出格式")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_create)
 
     # events
@@ -1293,6 +1333,7 @@ def main():
     p = subparsers.add_parser("exec", parents=[common_parser], help="在容器中执行命令")
     p.add_argument("pod", help="Pod 名称")
     p.add_argument("-c", "--container", help="容器名称")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_exec)
 
     # top
@@ -1325,6 +1366,7 @@ def main():
     p = subparsers.add_parser("kubeconfig-add", parents=[common_parser], help="合并外部 kubeconfig")
     p.add_argument("--from-file", dest="from_file", required=True, help="要合并的 kubeconfig 文件路径")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="仅预览合并结果，不写入文件")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_kubeconfig_add)
 
     # ---- RBAC 租户管理 ----
@@ -1335,6 +1377,7 @@ def main():
     p.add_argument("--role", required=True, choices=["readonly", "developer", "admin", "custom"], help="角色模板")
     p.add_argument("--rules-file", dest="rules_file", help="自定义规则文件路径（仅 custom 角色需要）")
     p.add_argument("--dry-run", dest="dry_run", choices=["client", "server"], help="试运行模式")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_rbac_create_tenant)
 
     # rbac-list-tenants
@@ -1345,6 +1388,7 @@ def main():
     # rbac-delete-tenant
     p = subparsers.add_parser("rbac-delete-tenant", parents=[common_parser], help="删除租户 RBAC 资源")
     p.add_argument("tenant_name", help="租户名称")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_rbac_delete_tenant)
 
     # rbac-get-token
@@ -1376,6 +1420,7 @@ def main():
     p.add_argument("--timeout", help="超时时间（如 5m0s）")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="试运行")
     p.add_argument("--atomic", action="store_true", help="失败时自动回滚")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_helm_install)
 
     # helm-upgrade
@@ -1392,6 +1437,7 @@ def main():
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="试运行")
     p.add_argument("--atomic", action="store_true", help="失败时自动回滚")
     p.add_argument("--reuse-values", dest="reuse_values", action="store_true", help="复用上次的 values")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_helm_upgrade)
 
     # helm-uninstall
@@ -1401,6 +1447,7 @@ def main():
     p.add_argument("--wait", action="store_true", help="等待删除完成")
     p.add_argument("--timeout", help="超时时间")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="试运行")
+    p.add_argument("-y", "--yes", action="store_true", help="跳过确认提示")
     p.set_defaults(func=cmd_helm_uninstall)
 
     # helm-list
